@@ -19,6 +19,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
   const [error, setError] = useState<string>('');
   const [liveTranscription, setLiveTranscription] = useState<string>('');
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const support = transcriptionService.isRecognitionSupported();
   const [support, setSupport] = useState<boolean>(transcriptionService.isRecognitionSupported());
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
