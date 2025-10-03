@@ -1,7 +1,7 @@
 // src/services/transcriptionService.ts
 
 export interface TranscriptionOptions {
-  language?: string;        // ej: 'es-ES'
+  language?: string;        // 'es-ES' por defecto
   continuous?: boolean;     // reconocimiento continuo
   interimResults?: boolean; // resultados parciales
 }
@@ -12,8 +12,6 @@ export interface TranscriptionResult {
   isFinal: boolean;
 }
 
-/** ───────────────────── Reconocimiento en vivo (micro) ───────────────────── */
-
 let currentRecognition: any | null = null;
 
 export function isRecognitionSupported(): boolean {
@@ -22,6 +20,7 @@ export function isRecognitionSupported(): boolean {
   return !!(w.SpeechRecognition || w.webkitSpeechRecognition);
 }
 
+/** Inicia el reconocimiento en vivo (micro). Devuelve un handler con stop() */
 export function startRecognition(
   onResult: (r: TranscriptionResult) => void,
   onError?: (msg: string) => void,
@@ -46,19 +45,17 @@ export function startRecognition(
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const res = event.results[i];
       const alt = res[0];
-      const payload: TranscriptionResult = {
+      onResult({
         text: alt?.transcript ?? '',
         confidence: typeof alt?.confidence === 'number' ? alt.confidence : (res.isFinal ? 0.9 : 0.5),
         isFinal: !!res.isFinal,
-      };
-      onResult(payload);
+      });
     }
   };
 
   rec.onerror = (event: any) => {
     const code = event?.error ?? 'unknown';
-    const msg = getErrorMessage(code);
-    onError?.(msg);
+    onError?.(getErrorMessage(code));
   };
 
   rec.onend = () => {
@@ -69,7 +66,7 @@ export function startRecognition(
   try {
     rec.start();
     currentRecognition = rec;
-  } catch (e) {
+  } catch {
     onError?.('No se pudo iniciar el reconocimiento de voz.');
     return null;
   }
@@ -80,8 +77,6 @@ export function startRecognition(
 export function stopRecognition() {
   try {
     currentRecognition?.stop();
-  } catch {
-    /* ignore */
   } finally {
     currentRecognition = null;
   }
@@ -97,27 +92,14 @@ function getErrorMessage(error: string): string {
   }
 }
 
-/** ─────────────── Transcribir blobs/URLs (no soportado en navegador) ─────────────── */
-
+/** Esta app NO soporta transcribir blobs en el navegador */
 export function canTranscribeFromUrl(): boolean {
-  // La Web Speech API NO ofrece reconocimiento de audio pregrabado (Blob/URL)
   return false;
 }
-
-// Si prefieres que NO exista la función, comenta esta exportación y el botón se ocultará por la comprobación del componente.
-export async function transcribeFromUrl(_url: string): Promise<string> {
-  throw new Error(
-    'Transcripción desde Blob/URL no está soportada por Web Speech API en el navegador. ' +
-    'Usa reconocimiento en vivo o un servicio de backend.'
-  );
-}
-
-/** ───────────────────── API agrupada (por compatibilidad) ─────────────────── */
 
 export const transcriptionService = {
   isRecognitionSupported,
   startRecognition,
   stopRecognition,
   canTranscribeFromUrl,
-  transcribeFromUrl, // comenta esta línea si quieres que la función "no exista"
 };
