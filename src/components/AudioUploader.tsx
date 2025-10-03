@@ -1,15 +1,17 @@
 import React, { useCallback, useState } from 'react';
 import { Upload, FileAudio, X, Check } from 'lucide-react';
-import { transcriptionService } from '../services/transcriptionService';
+import { transcriptionService, type TranscriptionService } from '../services/transcriptionService';
 
 interface AudioUploaderProps {
   onTranscriptionComplete: (text: string) => void;
   setIsProcessing: (processing: boolean) => void;
+  service?: TranscriptionService;
 }
 
-const AudioUploader: React.FC<AudioUploaderProps> = ({ 
-  onTranscriptionComplete, 
-  setIsProcessing 
+const AudioUploader: React.FC<AudioUploaderProps> = ({
+  onTranscriptionComplete,
+  setIsProcessing,
+  service = transcriptionService,
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -28,7 +30,7 @@ const AudioUploader: React.FC<AudioUploaderProps> = ({
     try {
 
       // Transcribir el archivo de audio real
-      const transcriptionText = await transcriptionService.transcribeAudioFile(file);
+      const transcriptionText = await service.transcribeAudioFile(file);
       onTranscriptionComplete(transcriptionText);
     } catch (error) {
       console.error('Error en transcripción:', error);

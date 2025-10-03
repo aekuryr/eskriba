@@ -12,6 +12,26 @@ export interface TranscriptionResult {
   isFinal: boolean;
 }
 
+export interface RecognitionHandle {
+  stop: () => void;
+}
+
+const SIMULATED_AUDIO_TRANSCRIPTION = `
+Paciente de nombre Ana Rodríguez, 28 años, femenino, nacida el 5 de julio de 1996.
+Motivo de consulta: dolor de cabeza intenso de 2 días de evolución, localizado en región frontal.
+Antecedentes médicos: migraña desde la adolescencia.
+Antecedentes quirúrgicos: ninguno.
+Antecedentes familiares: madre con historia de migraña.
+Hábitos: no fumadora, consume café regularmente.
+Examen físico: paciente alerta, signos vitales normales, sin signos neurológicos focales.
+Diagnóstico: crisis migrañosa.
+Plan de tratamiento: sumatriptán 50mg vía oral, reposo en lugar oscuro, seguimiento en 48 horas.
+`.trim();
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Estado interno de reconocimiento
 let currentRecognition: any | null = null;
 let shouldRestart = false;     // auto-reinicio mientras la UI esté grabando
@@ -33,7 +53,7 @@ export function startRecognition(
   onError?: (msg: string) => void,
   onEnd?: () => void,
   opts: TranscriptionOptions = { language: 'es-ES', continuous: true, interimResults: true }
-): { stop: () => void } | null {
+): RecognitionHandle | null {
   if (!isRecognitionSupported()) {
     onError?.('Reconocimiento de voz no soportado en este navegador');
     return null;
@@ -148,14 +168,39 @@ function getErrorMessage(error: string): string {
   }
 }
 
+export async function transcribeAudioFile(file: File): Promise<string> {
+  if (!file.type.startsWith('audio/')) {
+    throw new Error('El archivo proporcionado no es un audio válido.');
+  }
+
+  // Simula una espera de procesamiento como placeholder para una integración real
+  await delay(1500);
+
+  return SIMULATED_AUDIO_TRANSCRIPTION;
+}
+
 /** Esta app NO soporta transcribir blobs/URL en el navegador */
 export function canTranscribeFromUrl(): boolean {
   return false;
 }
 
-export const transcriptionService = {
+export interface TranscriptionService {
+  isRecognitionSupported: () => boolean;
+  startRecognition: (
+    onResult: (r: TranscriptionResult) => void,
+    onError?: (msg: string) => void,
+    onEnd?: () => void,
+    opts?: TranscriptionOptions
+  ) => RecognitionHandle | null;
+  stopRecognition: () => void;
+  transcribeAudioFile: (file: File) => Promise<string>;
+  canTranscribeFromUrl: () => boolean;
+}
+
+export const transcriptionService: TranscriptionService = {
   isRecognitionSupported,
   startRecognition,
   stopRecognition,
+  transcribeAudioFile,
   canTranscribeFromUrl,
 };
