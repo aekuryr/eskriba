@@ -7,6 +7,8 @@ type Props = {
 
 const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
   const support = transcriptionService.isRecognitionSupported();
+  // Flag de soporte para transcribir blobs/URL (Web Speech normalmente NO lo soporta)
+  const canTranscribeBlob = transcriptionService.canTranscribeFromUrl?.() ?? false;
 
   const [isRecording, setIsRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -15,9 +17,9 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null); // si luego quieres contadores/cronómetros
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Limpieza de recursos: revocar URL anterior y limpiar intervalos al cambiar audioUrl o al desmontar
+  // Cleanup: revoca la URL anterior y limpia intervalos al cambiar audioUrl o desmontar
   useEffect(() => {
     return () => {
       if (intervalRef.current) {
@@ -42,7 +44,6 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
 
   const startRecording = async () => {
     try {
-      // solicitar micrófono
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
@@ -59,7 +60,7 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
       mediaRecorder.onstop = () => {
         try {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm;codecs=opus' });
-          // revoca la URL previa (por si aún existe) y crea una nueva
+          // revoca la URL previa (si existe) y crea una nueva
           if (audioUrl) URL.revokeObjectURL(audioUrl);
           const url = URL.createObjectURL(audioBlob);
           setAudioUrl(url);
@@ -95,6 +96,11 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
 
   const handleTranscribe = async () => {
     if (!audioUrl) return;
+    if (!canTranscribeBlob || typeof transcriptionService.transcribeFromUrl !== 'function') {
+      alert('La transcripción de audio grabado no está disponible en el navegador. Usa “Grabar y transcribir en vivo”.');
+      return;
+    }
+
     setIsTranscribing(true);
     try {
       const text = await transcriptionService.transcribeFromUrl(audioUrl);
@@ -109,7 +115,7 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
 
   return (
     <div className="space-y-4">
-      <div className="flex space-x-4">
+      <div className="flex flex-wrap items-center gap-3">
         {!isRecording ? (
           <button
             onClick={startRecording}
@@ -126,7 +132,8 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
           </button>
         )}
 
-        {audioUrl && (
+        {/* Botón de transcribir solo si el servicio lo soporta */}
+        {canTranscribeBlob && audioUrl && (
           <button
             onClick={handleTranscribe}
             disabled={isTranscribing}
@@ -135,10 +142,18 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
             {isTranscribing ? 'Transcribiendo...' : 'Transcribir audio'}
           </button>
         )}
+
+        {/* Mensaje si hay audio pero no hay soporte para transcripción desde blob */}
+        {!canTranscribeBlob && audioUrl && (
+          <span className="text-sm text-yellow-800 bg-yellow-50 border border-yellow-200 px-2 py-1 rounded">
+            La transcripción de audio grabado no está disponible en este navegador.
+            Usa <b>Grabar y transcribir en vivo</b>.
+          </span>
+        )}
       </div>
 
       {audioUrl && (
-        <audio controls src={audioUrl} className="w-full mt-4 rounded-lg shadow-md" />
+        <audio controls src={audioUrl} className="w-full mt-2 rounded-lg shadow-md" />
       )}
     </div>
   );
