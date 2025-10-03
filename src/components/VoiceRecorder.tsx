@@ -2,6 +2,12 @@ const startRecording = async () => {
   // No inicies si ya estás iniciando o grabando
   if (isStartingRef.current || isRecording) return;
   isStartingRef.current = true;
+  
+useEffect(() => {
+  const onVis = () => console.log('[visibility]', document.visibilityState);
+  document.addEventListener('visibilitychange', onVis);
+  return () => document.removeEventListener('visibilitychange', onVis);
+}, []);
 
   try {
     // 1) Solicitar micro con algunas “hints” que ayudan en Chrome
