@@ -5,9 +5,14 @@ import { transcriptionService } from '../services/transcriptionService';
 interface VoiceRecorderProps {
   onTranscriptionComplete: (text: string) => void;
   setIsProcessing: (processing: boolean) => void;
+  onRecordingFinished?: () => void;
 }
 
-const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onTranscriptionComplete, setIsProcessing }) => {
+const VoiceRecorder: React.FC<VoiceRecorderProps> = ({
+  onTranscriptionComplete,
+  setIsProcessing,
+  onRecordingFinished,
+}) => {
   const [isRecording, setIsRecording] = useState(false);
   const [finalText, setFinalText] = useState('');
   const [interimText, setInterimText] = useState('');
@@ -171,6 +176,7 @@ const VoiceRecorder: React.FC<VoiceRecorderProps> = ({ onTranscriptionComplete, 
             if (prev) URL.revokeObjectURL(prev);
             return url;
           });
+          onRecordingFinished?.();
         } catch (e) {
           console.error('Error creando blob/URL de audio:', e);
           setAudioUrl(null);
