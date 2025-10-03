@@ -4,6 +4,79 @@ import { ClinicalRecord } from '../types/medical';
 import { saveTranscription } from '../utils/storage';
 import { useEffect } from 'react';
 
+interface SentenceMatch {
+  text: string;
+  indices: number[];
+}
+
+const normalizeForSearch = (value: string): string =>
+  value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const splitIntoSentences = (text: string): string[] =>
+  text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .map(sentence => sentence.trim())
+    .filter(Boolean);
+
+const findSentenceContaining = (
+  sentences: string[],
+  keywords: string[],
+  usedSentenceIndices: Set<number>
+): SentenceMatch | null => {
+  if (!sentences.length || !keywords.length) {
+    return null;
+  }
+
+  const normalizedKeywords = keywords
+    .map(keyword => normalizeForSearch(keyword))
+    .filter(Boolean);
+
+  if (!normalizedKeywords.length) {
+    return null;
+  }
+
+  const containsKeyword = (candidate: string) => {
+    const normalizedCandidate = normalizeForSearch(candidate);
+    return normalizedKeywords.some(keyword => normalizedCandidate.includes(keyword));
+  };
+
+  for (let index = 0; index < sentences.length; index += 1) {
+    if (usedSentenceIndices.has(index)) {
+      continue;
+    }
+
+    const sentence = sentences[index];
+    if (containsKeyword(sentence)) {
+      return { text: sentence, indices: [index] };
+    }
+  }
+
+  const maxWindowSize = Math.min(3, sentences.length);
+
+  for (let windowSize = 2; windowSize <= maxWindowSize; windowSize += 1) {
+    for (let startIndex = 0; startIndex <= sentences.length - windowSize; startIndex += 1) {
+      const indices = Array.from({ length: windowSize }, (_, offset) => startIndex + offset);
+
+      if (indices.some(index => usedSentenceIndices.has(index))) {
+        continue;
+      }
+
+      const combined = indices.map(index => sentences[index]).join(' ');
+
+      if (containsKeyword(combined)) {
+        return { text: combined, indices };
+      }
+    }
+  }
+
+  return null;
+};
+
 interface TranscriptionViewerProps {
   transcription: string;
   onClinicalRecordGenerated: (record: ClinicalRecord) => void;
@@ -26,115 +99,112 @@ const TranscriptionViewer: React.FC<TranscriptionViewerProps> = ({
       // Simular procesamiento con IA
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // Extraer información usando patrones simples (en producción usarías IA real)
-      const fallbackFromKeywords = (text: string, keywords: string[]): string | null => {
-        const lowerText = text.toLowerCase();
+      const sentences = splitIntoSentences(editedTranscription);
+      const usedSentenceIndices = new Set<number>();
 
-        for (const keyword of keywords) {
-          const lowerKeyword = keyword.toLowerCase();
-          const keywordIndex = lowerText.indexOf(lowerKeyword);
+      const markSentencesAsUsed = (text: string) => {
+        const normalizedText = normalizeForSearch(text);
 
-          if (keywordIndex !== -1) {
-            const startIndex = keywordIndex + lowerKeyword.length;
-            const remainingText = text.slice(startIndex).trim();
-            if (!remainingText) continue;
-
-            const sentenceCandidate = remainingText.split(/(?<=[.!?])\s+|\n+/)[0]?.trim();
-            if (sentenceCandidate) {
-              return sentenceCandidate;
-            }
-
-            return remainingText;
+        sentences.forEach((sentence, index) => {
+          if (usedSentenceIndices.has(index)) {
+            return;
           }
-        }
 
-        return null;
+          const normalizedSentence = normalizeForSearch(sentence);
+
+          if (normalizedSentence && normalizedText.includes(normalizedSentence)) {
+            usedSentenceIndices.add(index);
+          }
+        });
       };
 
-      const withFallback = (
+      const withHeuristicFallback = (
         primary: string | null,
-        keywords: string[],
-        transcriptionText: string
-      ) => primary ?? fallbackFromKeywords(transcriptionText, keywords);
+        keywords: string[]
+      ): string => {
+        if (primary && primary.trim()) {
+          markSentencesAsUsed(primary);
+          return primary.trim();
+        }
 
-      const fullTranscription = editedTranscription.trim();
+        const match = findSentenceContaining(sentences, keywords, usedSentenceIndices);
+
+        if (match) {
+          match.indices.forEach(index => usedSentenceIndices.add(index));
+          return match.text;
+        }
+
+        return '';
+      };
 
       const motivoConsulta =
-        withFallback(
+        withHeuristicFallback(
           extractSection(editedTranscription, [
             /motivo(?:\s+de)?\s+consulta[:-]?\s*(.*?)(?=antecedentes|examen|diagn[oó]stico|plan|tratamiento|$)/is,
             /consulta(?:\s+por|\s+debido\s+a)?[:-]?\s*(.*?)(?=antecedentes|examen|diagn[oó]stico|plan|tratamiento|$)/is,
             /presenta[:-]?\s*(.*?)(?=antecedentes|examen|diagn[oó]stico|plan|tratamiento|$)/is
           ]),
-          ['motivo de consulta', 'consulta por', 'consulta debido', 'presenta'],
-          editedTranscription
-        ) ?? fullTranscription;
+          ['motivo de consulta', 'consulta', 'refiere', 'presenta']
+        );
 
       const antecedentesMedicos =
-        withFallback(
+        withHeuristicFallback(
           extractSection(editedTranscription, [
             /antecedentes?\s+m[eé]dicos?[:-]?\s*(.*?)(?=antecedentes\s+quir[úu]rgicos|antecedentes\s+familiares|h[aá]bitos|examen|$)/is,
             /historia\s+m[eé]dica[:-]?\s*(.*?)(?=antecedentes\s+quir[úu]rgicos|antecedentes\s+familiares|h[aá]bitos|examen|$)/is
           ]),
-          ['antecedentes médicos', 'historia médica'],
-          editedTranscription
-        ) ?? fullTranscription;
+          ['antecedentes médicos', 'historia médica', 'enfermedad crónica', 'antecedentes personales']
+        );
 
       const antecedentesQuirurgicos =
-        withFallback(
+        withHeuristicFallback(
           extractSection(editedTranscription, [
             /antecedentes?\s+quir[úu]rgicos?[:-]?\s*(.*?)(?=antecedentes\s+familiares|h[aá]bitos|examen|$)/is
           ]),
-          ['antecedentes quirúrgicos'],
-          editedTranscription
-        ) ?? fullTranscription;
+          ['antecedentes quirúrgicos', 'cirug', 'operaci', 'intervención']
+        );
 
       const antecedentesFamiliares =
-        withFallback(
+        withHeuristicFallback(
           extractSection(editedTranscription, [
             /antecedentes?\s+familiares?[:-]?\s*(.*?)(?=h[aá]bitos|examen|diagn[oó]stico|plan|tratamiento|$)/is
           ]),
-          ['antecedentes familiares'],
-          editedTranscription
-        ) ?? fullTranscription;
+          ['antecedentes familiares', 'familia', 'heredit', 'padre', 'madre']
+        );
 
       const habitos =
-        withFallback(
+        withHeuristicFallback(
           extractSection(editedTranscription, [
             /h[aá]bitos?[:-]?\s*(.*?)(?=examen|diagn[oó]stico|plan|tratamiento|$)/is
           ]),
-          ['hábitos', 'habitos'],
-          editedTranscription
-        ) ?? fullTranscription;
+          ['hábitos', 'habitos', 'consumo', 'fuma', 'alcohol', 'actividad física']
+        );
 
       const examenFisico =
-        withFallback(
+        withHeuristicFallback(
           extractSection(editedTranscription, [
             /examen\s+f[ií]sico[:-]?\s*(.*?)(?=diagn[oó]stico|plan|tratamiento|$)/is
           ]),
-          ['examen físico', 'evaluación física'],
-          editedTranscription
-        ) ?? fullTranscription;
+          ['examen físico', 'exploración', 'signos vitales', 'evaluación física']
+        );
 
       const diagnostico =
-        withFallback(
+        withHeuristicFallback(
           extractSection(editedTranscription, [
             /diagn[oó]stico[:-]?\s*(.*?)(?=plan|tratamiento|$)/is,
             /se\s+diagnostica[:-]?\s*(.*?)(?=plan|tratamiento|$)/is
           ]),
-          ['diagnóstico', 'diagnostica'],
-          editedTranscription
-        ) ?? fullTranscription;
+          ['diagnóstico', 'diagnostica', 'impresión diagnóstica', 'dx']
+        );
 
       const planTratamiento =
-        withFallback(
+        withHeuristicFallback(
           extractSection(editedTranscription, [
             /(?:plan|tratamiento)[:-]?\s*(.*?)$/is,
             /se\s+indica[:-]?\s*(.*?)$/is
           ]),
-          ['plan de tratamiento', 'plan', 'tratamiento', 'se indica'],
-          editedTranscription
-        ) ?? fullTranscription;
+          ['plan de tratamiento', 'plan', 'tratamiento', 'se indica', 'manejo', 'indicaciones']
+        );
 
       const record: ClinicalRecord = {
         datosPaciente: {
