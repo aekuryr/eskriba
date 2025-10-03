@@ -1,15 +1,22 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ClinicalRecord } from '../types/medical';
 import { Download, FileDown } from 'lucide-react';
 
 interface ClinicalRecordFormProps {
-  record: ClinicalRecord;
-  onSave: (record: ClinicalRecord) => void;
+  initialRecord: ClinicalRecord;
+  onRecordUpdate: (record: ClinicalRecord) => void;
 }
 
-const ClinicalRecordForm: React.FC<ClinicalRecordFormProps> = ({ record, onSave }) => {
-  const [localRecord, setLocalRecord] = useState<ClinicalRecord>(record);
+const ClinicalRecordForm: React.FC<ClinicalRecordFormProps> = ({
+  initialRecord,
+  onRecordUpdate,
+}) => {
+  const [localRecord, setLocalRecord] = useState<ClinicalRecord>(initialRecord);
   const [activeSection, setActiveSection] = useState<string>('patient');
+
+  useEffect(() => {
+    setLocalRecord(initialRecord);
+  }, [initialRecord]);
 
   // ── utilidades de exportación ───────────────────────────────────────────────
   const exportToJSON = () => {
@@ -48,7 +55,7 @@ const ClinicalRecordForm: React.FC<ClinicalRecordFormProps> = ({ record, onSave 
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSave(localRecord);
+    onRecordUpdate(localRecord);
   };
 
   // ── render ─────────────────────────────────────────────────────────────────
