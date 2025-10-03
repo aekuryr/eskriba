@@ -1,8 +1,33 @@
+// src/services/transcriptionService.ts
+
+export interface TranscriptionOptions {
+  language?: string;        // 'es-ES' por defecto
+  continuous?: boolean;     // reconocimiento continuo
+  interimResults?: boolean; // resultados parciales
+}
+
+export interface TranscriptionResult {
+  text: string;
+  confidence: number;
+  isFinal: boolean;
+}
+
+// Estado interno de reconocimiento
 let currentRecognition: any | null = null;
-let shouldRestart = false;        // ← nuevo: bandera para auto-reinicio
+let shouldRestart = false;     // auto-reinicio mientras la UI esté grabando
 let restartTimer: any = null;
 let restartCount = 0;
 
+export function isRecognitionSupported(): boolean {
+  if (typeof window === 'undefined') return false;
+  const w = window as any;
+  return !!(w.SpeechRecognition || w.webkitSpeechRecognition);
+}
+
+/**
+ * Inicia el reconocimiento en vivo (micro) y se auto-reinicia si Chrome corta
+ * por 'aborted'/'no-speech' o porque dispara onend tras pocos segundos.
+ */
 export function startRecognition(
   onResult: (r: TranscriptionResult) => void,
   onError?: (msg: string) => void,
@@ -23,24 +48,24 @@ export function startRecognition(
   rec.interimResults = opts.interimResults ?? true;
   rec.maxAlternatives = 1;
 
-  // reinicio seguro
   const scheduleRestart = () => {
+    // programa un nuevo start() con backoff si la UI aún quiere seguir
     if (!shouldRestart) return;
     if (restartTimer) clearTimeout(restartTimer);
-    // Backoff básico: 200ms, 400ms, 800ms… máx ~2s
-    const delay = Math.min(200 * Math.pow(2, restartCount), 2000);
+    const delay = Math.min(200 * Math.pow(2, restartCount), 2000); // 200ms → 2s
     restartTimer = setTimeout(() => {
       try {
         rec.start();
         restartCount++;
       } catch {
-        // si falla start(), reintenta en el próximo onend/onerror
+        // si falla start(), reintentaremos en el próximo onend/onerror
       }
     }, delay);
   };
 
   rec.onstart = () => {
-    restartCount = 0; // se resetea backoff cuando arranca bien
+    // cuando arranca bien, reseteamos el backoff
+    restartCount = 0;
   };
 
   rec.onresult = (event: any) => {
@@ -49,7 +74,12 @@ export function startRecognition(
       const alt = res[0];
       onResult({
         text: alt?.transcript ?? '',
-        confidence: typeof alt?.confidence === 'number' ? alt.confidence : (res.isFinal ? 0.9 : 0.5),
+        confidence:
+          typeof alt?.confidence === 'number'
+            ? alt.confidence
+            : res.isFinal
+            ? 0.9
+            : 0.5,
         isFinal: !!res.isFinal,
       });
     }
@@ -57,18 +87,18 @@ export function startRecognition(
 
   rec.onerror = (event: any) => {
     const code = event?.error ?? 'unknown';
-    // Estos códigos suelen aparecer cuando Chrome corta pronto
+    // Errores típicos cuando Chrome corta solo
     if (code === 'aborted' || code === 'no-speech' || code === 'network') {
       onError?.(`Reconocimiento: ${code}`);
       scheduleRestart();
       return;
     }
-    // Otros errores: reporta y no fuerces reinicio
+    // Otros errores: reportar y no forzar reinicio
     onError?.(getErrorMessage(code));
   };
 
   rec.onend = () => {
-    // Chrome llama a onend cada vez que “cierra” un segmento.
+    // Chrome dispara onend incluso con continuous: true
     if (shouldRestart) {
       scheduleRestart();
     } else {
@@ -80,19 +110,18 @@ export function startRecognition(
   try {
     rec.start();
     currentRecognition = rec;
-    shouldRestart = true; // ← habilita auto-reinicio
+    shouldRestart = true; // habilita auto-reinicio hasta que stopRecognition() lo apague
   } catch {
     onError?.('No se pudo iniciar el reconocimiento de voz.');
     return null;
   }
 
-  return {
-    stop: () => stopRecognition()
-  };
+  return { stop: () => stopRecognition() };
 }
 
 export function stopRecognition() {
-  shouldRestart = false;          // ← desactiva auto-reinicio
+  // apaga el auto-reinicio y detén la sesión actual
+  shouldRestart = false;
   if (restartTimer) {
     clearTimeout(restartTimer);
     restartTimer = null;
@@ -103,3 +132,30 @@ export function stopRecognition() {
     currentRecognition = null;
   }
 }
+
+function getErrorMessage(error: string): string {
+  switch (error) {
+    case 'no-speech':
+      return 'No se detectó voz. Intenta hablar más cerca del micrófono.';
+    case 'audio-capture':
+      return 'Error al capturar audio. Verifica los permisos del micrófono.';
+    case 'not-allowed':
+      return 'Permisos de micrófono denegados. Permite el acceso al micrófono.';
+    case 'network':
+      return 'Error de red. Verifica tu conexión a internet.';
+    default:
+      return `Error de reconocimiento de voz: ${error}`;
+  }
+}
+
+/** Esta app NO soporta transcribir blobs/URL en el navegador */
+export function canTranscribeFromUrl(): boolean {
+  return false;
+}
+
+export const transcriptionService = {
+  isRecognitionSupported,
+  startRecognition,
+  stopRecognition,
+  canTranscribeFromUrl,
+};
