@@ -28,7 +28,6 @@ function App() {
 
   const handleTranscriptionComplete = (text: string) => {
     setTranscription(text);
-    setActiveTab('transcription');
   };
 
   const handleClinicalRecordGenerated = (record: ClinicalRecord) => {
@@ -141,6 +140,7 @@ function App() {
               <VoiceRecorder
                 onTranscriptionComplete={handleTranscriptionComplete}
                 setIsProcessing={setIsProcessing}
+                onRecordingFinished={() => setActiveTab('transcription')}
               />
             )}
             
