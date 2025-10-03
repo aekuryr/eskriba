@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Edit3, Wand2, FileText } from 'lucide-react';
 import { ClinicalRecord } from '../types/medical';
-import { saveTranscription, saveClinicalRecord } from '../utils/storage';
+import { saveTranscription } from '../utils/storage';
 import { useEffect } from 'react';
 
 interface TranscriptionViewerProps {
@@ -27,24 +27,141 @@ const TranscriptionViewer: React.FC<TranscriptionViewerProps> = ({
       await new Promise(resolve => setTimeout(resolve, 2000));
 
       // Extraer información usando patrones simples (en producción usarías IA real)
+      const fallbackFromKeywords = (text: string, keywords: string[]): string | null => {
+        const lowerText = text.toLowerCase();
+
+        for (const keyword of keywords) {
+          const lowerKeyword = keyword.toLowerCase();
+          const keywordIndex = lowerText.indexOf(lowerKeyword);
+
+          if (keywordIndex !== -1) {
+            const startIndex = keywordIndex + lowerKeyword.length;
+            const remainingText = text.slice(startIndex).trim();
+            if (!remainingText) continue;
+
+            const sentenceCandidate = remainingText.split(/(?<=[.!?])\s+|\n+/)[0]?.trim();
+            if (sentenceCandidate) {
+              return sentenceCandidate;
+            }
+
+            return remainingText;
+          }
+        }
+
+        return null;
+      };
+
+      const withFallback = (
+        primary: string | null,
+        keywords: string[],
+        transcriptionText: string
+      ) => primary ?? fallbackFromKeywords(transcriptionText, keywords);
+
+      const fullTranscription = editedTranscription.trim();
+
+      const motivoConsulta =
+        withFallback(
+          extractSection(editedTranscription, [
+            /motivo(?:\s+de)?\s+consulta[:-]?\s*(.*?)(?=antecedentes|examen|diagn[oó]stico|plan|tratamiento|$)/is,
+            /consulta(?:\s+por|\s+debido\s+a)?[:-]?\s*(.*?)(?=antecedentes|examen|diagn[oó]stico|plan|tratamiento|$)/is,
+            /presenta[:-]?\s*(.*?)(?=antecedentes|examen|diagn[oó]stico|plan|tratamiento|$)/is
+          ]),
+          ['motivo de consulta', 'consulta por', 'consulta debido', 'presenta'],
+          editedTranscription
+        ) ?? fullTranscription;
+
+      const antecedentesMedicos =
+        withFallback(
+          extractSection(editedTranscription, [
+            /antecedentes?\s+m[eé]dicos?[:-]?\s*(.*?)(?=antecedentes\s+quir[úu]rgicos|antecedentes\s+familiares|h[aá]bitos|examen|$)/is,
+            /historia\s+m[eé]dica[:-]?\s*(.*?)(?=antecedentes\s+quir[úu]rgicos|antecedentes\s+familiares|h[aá]bitos|examen|$)/is
+          ]),
+          ['antecedentes médicos', 'historia médica'],
+          editedTranscription
+        ) ?? fullTranscription;
+
+      const antecedentesQuirurgicos =
+        withFallback(
+          extractSection(editedTranscription, [
+            /antecedentes?\s+quir[úu]rgicos?[:-]?\s*(.*?)(?=antecedentes\s+familiares|h[aá]bitos|examen|$)/is
+          ]),
+          ['antecedentes quirúrgicos'],
+          editedTranscription
+        ) ?? fullTranscription;
+
+      const antecedentesFamiliares =
+        withFallback(
+          extractSection(editedTranscription, [
+            /antecedentes?\s+familiares?[:-]?\s*(.*?)(?=h[aá]bitos|examen|diagn[oó]stico|plan|tratamiento|$)/is
+          ]),
+          ['antecedentes familiares'],
+          editedTranscription
+        ) ?? fullTranscription;
+
+      const habitos =
+        withFallback(
+          extractSection(editedTranscription, [
+            /h[aá]bitos?[:-]?\s*(.*?)(?=examen|diagn[oó]stico|plan|tratamiento|$)/is
+          ]),
+          ['hábitos', 'habitos'],
+          editedTranscription
+        ) ?? fullTranscription;
+
+      const examenFisico =
+        withFallback(
+          extractSection(editedTranscription, [
+            /examen\s+f[ií]sico[:-]?\s*(.*?)(?=diagn[oó]stico|plan|tratamiento|$)/is
+          ]),
+          ['examen físico', 'evaluación física'],
+          editedTranscription
+        ) ?? fullTranscription;
+
+      const diagnostico =
+        withFallback(
+          extractSection(editedTranscription, [
+            /diagn[oó]stico[:-]?\s*(.*?)(?=plan|tratamiento|$)/is,
+            /se\s+diagnostica[:-]?\s*(.*?)(?=plan|tratamiento|$)/is
+          ]),
+          ['diagnóstico', 'diagnostica'],
+          editedTranscription
+        ) ?? fullTranscription;
+
+      const planTratamiento =
+        withFallback(
+          extractSection(editedTranscription, [
+            /(?:plan|tratamiento)[:-]?\s*(.*?)$/is,
+            /se\s+indica[:-]?\s*(.*?)$/is
+          ]),
+          ['plan de tratamiento', 'plan', 'tratamiento', 'se indica'],
+          editedTranscription
+        ) ?? fullTranscription;
+
       const record: ClinicalRecord = {
         datosPaciente: {
-          nombre: extractPattern(editedTranscription, /(?:paciente|nombre)(?:\s+de\s+nombre|\s+llamad[oa]|\s+es)?\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)/i) || '',
+          nombre:
+            extractPattern(editedTranscription, [
+              /(?:paciente|nombre)(?:\s+de\s+nombre|\s+llamad[oa]|\s+es)?\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)/i,
+              /de\s+nombre\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)/i,
+              /se\s+identifica\s+como\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)/i
+            ]) || '',
           edad: parseInt(extractPattern(editedTranscription, /(\d+)\s+años?/i) || '0'),
           genero: extractPattern(editedTranscription, /(masculino|femenino|hombre|mujer)/i) || '',
-          fechaNacimiento: extractPattern(editedTranscription, /(?:nacid[oa]|fecha de nacimiento)(?:\s+el)?\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})/i) || '',
+          fechaNacimiento:
+            extractPattern(editedTranscription, [
+              /(?:nacid[oa]|fecha\s+de\s+nacimiento)(?:\s+el)?\s+(\d{1,2}\s+de\s+\w+\s+de\s+\d{4})/i
+            ]) || '',
           numeroHistoriaClinica: `HC-${Date.now().toString().slice(-6)}`
         },
-        motivoConsulta: extractSection(editedTranscription, /motivo de consulta[:\-]?\s*(.*?)(?=antecedentes|examen|diagnóstico|$)/is) || '',
+        motivoConsulta,
         historiaMedica: {
-          antecedentesMedicos: extractSection(editedTranscription, /antecedentes médicos[:\-]?\s*(.*?)(?=antecedentes quirúrgicos|antecedentes familiares|hábitos|examen|$)/is) || '',
-          antecedentesQuirurgicos: extractSection(editedTranscription, /antecedentes quirúrgicos[:\-]?\s*(.*?)(?=antecedentes familiares|hábitos|examen|$)/is) || '',
-          antecedentesFamiliares: extractSection(editedTranscription, /antecedentes familiares[:\-]?\s*(.*?)(?=hábitos|examen|$)/is) || '',
-          habitos: extractSection(editedTranscription, /hábitos[:\-]?\s*(.*?)(?=examen|diagnóstico|$)/is) || ''
+          antecedentesMedicos,
+          antecedentesQuirurgicos,
+          antecedentesFamiliares,
+          habitos
         },
-        examenFisico: extractSection(editedTranscription, /examen físico[:\-]?\s*(.*?)(?=diagnóstico|plan|$)/is) || '',
-        diagnostico: extractSection(editedTranscription, /diagnóstico[:\-]?\s*(.*?)(?=plan|tratamiento|$)/is) || '',
-        planTratamiento: extractSection(editedTranscription, /(?:plan|tratamiento)[:\-]?\s*(.*?)$/is) || '',
+        examenFisico,
+        diagnostico,
+        planTratamiento,
         fechaGeneracion: new Date().toLocaleDateString('es-ES')
       };
 
@@ -56,14 +173,28 @@ const TranscriptionViewer: React.FC<TranscriptionViewerProps> = ({
     }
   };
 
-  const extractPattern = (text: string, pattern: RegExp): string | null => {
-    const match = text.match(pattern);
-    return match ? match[1].trim() : null;
+  const extractPattern = (text: string, pattern: RegExp | RegExp[]): string | null => {
+    const patterns = Array.isArray(pattern) ? pattern : [pattern];
+    for (const currentPattern of patterns) {
+      const match = text.match(currentPattern);
+      if (match && match[1]) {
+        return match[1].trim();
+      }
+    }
+
+    return null;
   };
 
-  const extractSection = (text: string, pattern: RegExp): string | null => {
-    const match = text.match(pattern);
-    return match ? match[1].trim() : null;
+  const extractSection = (text: string, pattern: RegExp | RegExp[]): string | null => {
+    const patterns = Array.isArray(pattern) ? pattern : [pattern];
+    for (const currentPattern of patterns) {
+      const match = text.match(currentPattern);
+      if (match && match[1]) {
+        return match[1].trim();
+      }
+    }
+
+    return null;
   };
 
   return (
