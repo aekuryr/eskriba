@@ -8,35 +8,26 @@ type Props = {
 const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
   const support = transcriptionService.isRecognitionSupported();
 
-  // ¿El servicio declara soporte para blobs?
-  const canTranscribeBlobFlag = transcriptionService.canTranscribeFromUrl?.() ?? false;
-  // ¿Existe realmente la función en tiempo de ejecución?
-  const hasTranscribeFn =
-    typeof (transcriptionService as any).transcribeFromUrl === 'function';
-
-  // Solo mostramos el botón si ambas condiciones son verdaderas
-  const showTranscribeButton = canTranscribeBlobFlag && hasTranscribeFn;
-
   const [isRecording, setIsRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [isTranscribing, setIsTranscribing] = useState(false);
+
+  // Transcripción en vivo
+  const [finalText, setFinalText] = useState('');     // texto confirmado
+  const [interimText, setInterimText] = useState(''); // texto parcial
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const recoStopRef = useRef<null | { stop: () => void }>(null);
 
-  // Cleanup: revocar URL previa y limpiar intervalos
+  // Limpiar URL de audio al cambiar o desmontar
   useEffect(() => {
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
       if (audioUrl) URL.revokeObjectURL(audioUrl);
     };
   }, [audioUrl]);
 
+  // Si el navegador no soporta SpeechRecognition
   if (!support) {
     return (
       <div className="p-4 border border-yellow-200 bg-yellow-50 rounded-md text-yellow-900">
@@ -48,6 +39,7 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
 
   const startRecording = async () => {
     try {
+      // 1) Micro
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
@@ -62,13 +54,16 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
       mediaRecorder.onstop = () => {
         try {
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm;codecs=opus' });
-          if (audioUrl) URL.revokeObjectURL(audioUrl);
           const url = URL.createObjectURL(audioBlob);
-          setAudioUrl(url);
+          setAudioUrl((prev) => {
+            if (prev) URL.revokeObjectURL(prev);
+            return url;
+          });
         } catch (e) {
           console.error('Error creando blob/URL de audio:', e);
           setAudioUrl(null);
         } finally {
+          // liberar el micro
           if (streamRef.current) {
             streamRef.current.getTracks().forEach((t) => t.stop());
             streamRef.current = null;
@@ -78,6 +73,35 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
 
       mediaRecorder.start();
       setIsRecording(true);
+
+      // 2) Reconocimiento en vivo
+      setFinalText('');
+      setInterimText('');
+      recoStopRef.current = transcriptionService.startRecognition(
+        (r) => {
+          if (r.isFinal) {
+            setFinalText((prev) => {
+              const next = (prev ? prev + ' ' : '') + r.text.trim();
+              // Notifica hacia arriba con el total (final + lo parcial de ese momento)
+              onTranscriptionComplete(next + (interimText ? ' ' + interimText : ''));
+              return next;
+            });
+            setInterimText('');
+          } else {
+            setInterimText(r.text.trim());
+            // También puedes notificar en tiempo real si lo deseas:
+            onTranscriptionComplete(finalText + (r.text ? ' ' + r.text.trim() : ''));
+          }
+        },
+        (errMsg) => {
+          console.warn('Reconocimiento:', errMsg);
+        },
+        () => {
+          // onEnd del reconocimiento (no hace falta nada especial)
+        },
+        { language: 'es-ES', continuous: true, interimResults: true }
+      );
+
     } catch (err) {
       console.error('Error al iniciar la grabación:', err);
       alert('No se pudo acceder al micrófono. Revisa permisos del navegador.');
@@ -86,32 +110,18 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
 
   const stopRecording = () => {
     try {
+      // Detener MediaRecorder
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop();
       }
+      // Detener reconocimiento
+      recoStopRef.current?.stop();
+      recoStopRef.current = null;
     } finally {
       setIsRecording(false);
-    }
-  };
-
-  const handleTranscribe = async () => {
-    if (!audioUrl) return;
-
-    // Doble defensa: si no hay soporte/función, no intentes transcribir
-    if (!showTranscribeButton) {
-      alert('La transcripción de audio grabado no está disponible en este navegador. Usa “Grabar y transcribir en vivo”.');
-      return;
-    }
-
-    setIsTranscribing(true);
-    try {
-      const text = await (transcriptionService as any).transcribeFromUrl(audioUrl);
-      onTranscriptionComplete(text);
-    } catch (err) {
-      console.error('Error al transcribir:', err);
-      alert('Ocurrió un error durante la transcripción.');
-    } finally {
-      setIsTranscribing(false);
+      // Opcional: notificar el texto final consolidado
+      onTranscriptionComplete((finalText + (interimText ? ' ' + interimText : '')).trim());
+      setInterimText(''); // limpias lo parcial
     }
   };
 
@@ -133,28 +143,21 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
             ⏹️ Detener grabación
           </button>
         )}
-
-        {/* Botón solo si hay soporte real */}
-        {showTranscribeButton && audioUrl && (
-          <button
-            onClick={handleTranscribe}
-            disabled={isTranscribing}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-          >
-            {isTranscribing ? 'Transcribiendo...' : 'Transcribir audio'}
-          </button>
-        )}
-
-        {/* Mensaje si hay audio pero NO hay soporte */}
-        {!showTranscribeButton && audioUrl && (
-          <span className="text-sm text-yellow-800 bg-yellow-50 border border-yellow-200 px-2 py-1 rounded">
-            La transcripción de audio grabado no está disponible en el navegador.
-            Usa <b>Grabar y transcribir en vivo</b>.
-          </span>
-        )}
       </div>
 
-      {audioUrl && <audio controls src={audioUrl} className="w-full mt-2 rounded-lg shadow-md" />}
+      {/* Vista de transcripción en vivo */}
+      {(finalText || interimText) && (
+        <div className="p-3 rounded-md bg-gray-50 border text-gray-800">
+          <div className="whitespace-pre-wrap leading-relaxed">
+            {finalText}
+            {interimText && <span className="opacity-70"> {interimText}</span>}
+          </div>
+        </div>
+      )}
+
+      {audioUrl && (
+        <audio controls src={audioUrl} className="w-full mt-2 rounded-lg shadow-md" />
+      )}
     </div>
   );
 };
