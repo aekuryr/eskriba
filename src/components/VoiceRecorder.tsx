@@ -12,12 +12,14 @@ const VoiceRecorder: React.FC<{ onTranscriptionComplete: (text: string) => void 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
-    if (audioUrl) {
-      URL.revokeObjectURL(audioUrl);
-    }
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+      }
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
+    };
   }, [audioUrl]);
 
   // ⚠️ Early return si el navegador no soporta SpeechRecognition
