@@ -1,20 +1,28 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { transcriptionService } from '../services/transcriptionService';
 
-const VoiceRecorder: React.FC<{ onTranscriptionComplete: (text: string) => void }> = ({ onTranscriptionComplete }) => {
+type Props = {
+  onTranscriptionComplete: (text: string) => void;
+};
+
+const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
   const support = transcriptionService.isRecognitionSupported();
 
   const [isRecording, setIsRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunks = useRef<Blob[]>([]);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const intervalRef = useRef<NodeJS.Timeout | null>(null); // si luego quieres contadores/cronómetros
+
+  // Limpieza de recursos: revocar URL anterior y limpiar intervalos al cambiar audioUrl o al desmontar
   useEffect(() => {
     return () => {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
       if (audioUrl) {
         URL.revokeObjectURL(audioUrl);
@@ -22,7 +30,7 @@ const VoiceRecorder: React.FC<{ onTranscriptionComplete: (text: string) => void 
     };
   }, [audioUrl]);
 
-  // ⚠️ Early return si el navegador no soporta SpeechRecognition
+  // Si el navegador no soporta SpeechRecognition, mostramos aviso
   if (!support) {
     return (
       <div className="p-4 border border-yellow-200 bg-yellow-50 rounded-md text-yellow-900">
@@ -34,33 +42,53 @@ const VoiceRecorder: React.FC<{ onTranscriptionComplete: (text: string) => void 
 
   const startRecording = async () => {
     try {
+      // solicitar micrófono
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
-      audioChunks.current = [];
+      audioChunksRef.current = [];
 
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunks.current.push(event.data);
+      mediaRecorder.ondataavailable = (evt) => {
+        if (evt.data && evt.data.size > 0) {
+          audioChunksRef.current.push(evt.data);
         }
       };
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunks.current, { type: 'audio/webm' });
-        const url = URL.createObjectURL(audioBlob);
-        setAudioUrl(url);
+        try {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm;codecs=opus' });
+          // revoca la URL previa (por si aún existe) y crea una nueva
+          if (audioUrl) URL.revokeObjectURL(audioUrl);
+          const url = URL.createObjectURL(audioBlob);
+          setAudioUrl(url);
+        } catch (e) {
+          console.error('Error creando blob/URL de audio:', e);
+          setAudioUrl(null);
+        } finally {
+          // liberar el micrófono
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach((t) => t.stop());
+            streamRef.current = null;
+          }
+        }
       };
 
       mediaRecorder.start();
       setIsRecording(true);
     } catch (err) {
       console.error('Error al iniciar la grabación:', err);
+      alert('No se pudo acceder al micrófono. Revisa permisos del navegador.');
     }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
+    try {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+    } finally {
       setIsRecording(false);
     }
   };
@@ -73,6 +101,7 @@ const VoiceRecorder: React.FC<{ onTranscriptionComplete: (text: string) => void 
       onTranscriptionComplete(text);
     } catch (err) {
       console.error('Error al transcribir:', err);
+      alert('Ocurrió un error durante la transcripción.');
     } finally {
       setIsTranscribing(false);
     }
@@ -82,11 +111,17 @@ const VoiceRecorder: React.FC<{ onTranscriptionComplete: (text: string) => void 
     <div className="space-y-4">
       <div className="flex space-x-4">
         {!isRecording ? (
-          <button onClick={startRecording} className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
+          <button
+            onClick={startRecording}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+          >
             🎙️ Iniciar grabación
           </button>
         ) : (
-          <button onClick={stopRecording} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">
+          <button
+            onClick={stopRecording}
+            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+          >
             ⏹️ Detener grabación
           </button>
         )}
