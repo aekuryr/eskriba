@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ClinicalRecord } from '../types/medical';
+import { ClinicalRecord, MedicalHistory } from '../types/medical';
 import { Download, FileDown } from 'lucide-react';
 
 interface ClinicalRecordFormProps {
@@ -12,7 +12,7 @@ const ClinicalRecordForm: React.FC<ClinicalRecordFormProps> = ({
   onRecordUpdate,
 }) => {
   const [localRecord, setLocalRecord] = useState<ClinicalRecord>(initialRecord);
-  const [activeSection, setActiveSection] = useState<string>('patient');
+  const [activeSection, setActiveSection] = useState<string>('datosPaciente');
 
   useEffect(() => {
     setLocalRecord(initialRecord);
@@ -53,6 +53,19 @@ const ClinicalRecordForm: React.FC<ClinicalRecordFormProps> = ({
     }));
   };
 
+  const handleMedicalHistoryChange = (
+    field: keyof MedicalHistory,
+    value: string
+  ) => {
+    setLocalRecord((prev) => ({
+      ...prev,
+      historiaMedica: {
+        ...prev.historiaMedica,
+        [field]: value,
+      },
+    }));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onRecordUpdate(localRecord);
@@ -78,13 +91,35 @@ const ClinicalRecordForm: React.FC<ClinicalRecordFormProps> = ({
           <button
             type="button"
             className={`px-3 py-2 rounded-md ${
-              activeSection === 'antecedentes'
+              activeSection === 'motivoConsulta'
                 ? 'bg-blue-600 text-white'
                 : 'bg-gray-200'
             }`}
-            onClick={() => setActiveSection('antecedentes')}
+            onClick={() => setActiveSection('motivoConsulta')}
+          >
+            Motivo de consulta
+          </button>
+          <button
+            type="button"
+            className={`px-3 py-2 rounded-md ${
+              activeSection === 'historiaMedica'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-200'
+            }`}
+            onClick={() => setActiveSection('historiaMedica')}
           >
             Antecedentes
+          </button>
+          <button
+            type="button"
+            className={`px-3 py-2 rounded-md ${
+              activeSection === 'examenFisico'
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-200'
+            }`}
+            onClick={() => setActiveSection('examenFisico')}
+          >
+            Examen físico
           </button>
           <button
             type="button"
@@ -138,12 +173,75 @@ const ClinicalRecordForm: React.FC<ClinicalRecordFormProps> = ({
           </div>
         )}
 
-        {activeSection === 'antecedentes' && (
+        {activeSection === 'motivoConsulta' && (
           <textarea
-            placeholder="Antecedentes médicos"
-            value={localRecord.antecedentes || ''}
+            placeholder="Motivo de consulta"
+            value={localRecord.motivoConsulta || ''}
             onChange={(e) =>
-              setLocalRecord({ ...localRecord, antecedentes: e.target.value })
+              setLocalRecord((prev) => ({
+                ...prev,
+                motivoConsulta: e.target.value,
+              }))
+            }
+            className="w-full border p-2 rounded-md"
+          />
+        )}
+
+        {activeSection === 'historiaMedica' && (
+          <div className="space-y-3">
+            <textarea
+              placeholder="Antecedentes médicos"
+              value={localRecord.historiaMedica?.antecedentesMedicos || ''}
+              onChange={(e) =>
+                handleMedicalHistoryChange(
+                  'antecedentesMedicos',
+                  e.target.value
+                )
+              }
+              className="w-full border p-2 rounded-md"
+            />
+            <textarea
+              placeholder="Antecedentes quirúrgicos"
+              value={localRecord.historiaMedica?.antecedentesQuirurgicos || ''}
+              onChange={(e) =>
+                handleMedicalHistoryChange(
+                  'antecedentesQuirurgicos',
+                  e.target.value
+                )
+              }
+              className="w-full border p-2 rounded-md"
+            />
+            <textarea
+              placeholder="Antecedentes familiares"
+              value={localRecord.historiaMedica?.antecedentesFamiliares || ''}
+              onChange={(e) =>
+                handleMedicalHistoryChange(
+                  'antecedentesFamiliares',
+                  e.target.value
+                )
+              }
+              className="w-full border p-2 rounded-md"
+            />
+            <textarea
+              placeholder="Hábitos"
+              value={localRecord.historiaMedica?.habitos || ''}
+              onChange={(e) =>
+                handleMedicalHistoryChange('habitos', e.target.value)
+              }
+              className="w-full border p-2 rounded-md"
+            />
+          </div>
+        )}
+
+        {activeSection === 'examenFisico' && (
+          <textarea
+            placeholder="Examen físico"
+            value={localRecord.examenFisico || ''}
+            onChange={(e) =>
+              setLocalRecord((prev) => ({
+                ...prev,
+                examenFisico: e.target.value,
+              }))
             }
             className="w-full border p-2 rounded-md"
           />
@@ -154,7 +252,10 @@ const ClinicalRecordForm: React.FC<ClinicalRecordFormProps> = ({
             placeholder="Diagnóstico"
             value={localRecord.diagnostico || ''}
             onChange={(e) =>
-              setLocalRecord({ ...localRecord, diagnostico: e.target.value })
+              setLocalRecord((prev) => ({
+                ...prev,
+                diagnostico: e.target.value,
+              }))
             }
             className="w-full border p-2 rounded-md"
           />
@@ -163,9 +264,12 @@ const ClinicalRecordForm: React.FC<ClinicalRecordFormProps> = ({
         {activeSection === 'tratamiento' && (
           <textarea
             placeholder="Plan de tratamiento"
-            value={localRecord.tratamiento || ''}
+            value={localRecord.planTratamiento || ''}
             onChange={(e) =>
-              setLocalRecord({ ...localRecord, tratamiento: e.target.value })
+              setLocalRecord((prev) => ({
+                ...prev,
+                planTratamiento: e.target.value,
+              }))
             }
             className="w-full border p-2 rounded-md"
           />
