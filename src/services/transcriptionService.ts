@@ -410,9 +410,28 @@ export class RealTimeTranscriptionService {
     }
   }
 
-  public isRecognitionSupported(): boolean {
-    return this.isSupported;
-  }
+function isRecognitionSupported(): boolean {
+  // ya lo tienes; lo incluyo por contexto
+  return typeof window !== 'undefined' && (
+    // @ts-ignore
+    window.SpeechRecognition || window.webkitSpeechRecognition
+  );
+}
+indicamos explícitamente que no podemos transcribir blobs con Web Speech
+function canTranscribeFromUrl(): boolean {
+  return false; // no hay soporte nativo del navegador para audio pregrabado
 }
 
-export const transcriptionService = new RealTimeTranscriptionService();
+// ⬇️ NUEVO: stub que avisa claramente
+async function transcribeFromUrl(_url: string): Promise<string> {
+  throw new Error(
+    'Transcripción desde Blob/URL no está soportada por Web Speech API en el navegador. ' +
+    'Usa reconocimiento en vivo o un servicio de backend.'
+  );
+}
+
+export const transcriptionService = {
+  isRecognitionSupported,
+  canTranscribeFromUrl,
+  transcribeFromUrl,
+};
