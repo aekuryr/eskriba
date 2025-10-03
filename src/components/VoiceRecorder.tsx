@@ -8,23 +8,28 @@ type Props = {
 const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
   const support = transcriptionService.isRecognitionSupported();
 
+  // estado UI
   const [isRecording, setIsRecording] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-
-  // Transcripción en vivo
   const [finalText, setFinalText] = useState('');
   const [interimText, setInterimText] = useState('');
 
+  // refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recoStopRef = useRef<null | { stop: () => void }>(null);
+  const isStartingRef = useRef(false);   // ← evita dobles inicios
 
+  // limpiar URL al desmontar/cambiar
   useEffect(() => {
     return () => {
       if (audioUrl) URL.revokeObjectURL(audioUrl);
+      // si desmonta la pestaña, frenamos todo
+      hardStopAll();
     };
-  }, [audioUrl]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (!support) {
     return (
@@ -35,11 +40,41 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
     );
   }
 
-  const startRecording = async () => {
+  /** Detiene reconocimiento y media, usado en unmount/tab-change también */
+  const hardStopAll = () => {
     try {
+      transcriptionService.stopRecognition();
+    } catch {}
+    try {
+      recoStopRef.current?.stop();
+      recoStopRef.current = null;
+    } catch {}
+    try {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.stop();
+      }
+    } catch {}
+    try {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+    } catch {}
+    isStartingRef.current = false;
+    setIsRecording(false);
+  };
+
+  const startRecording = async () => {
+    // SEGURIDAD: no iniciar si ya estamos iniciando o grabando
+    if (isStartingRef.current || isRecording) return;
+    isStartingRef.current = true;
+
+    try {
+      // 1) Pedimos micro
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
+      // 2) MediaRecorder
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -70,55 +105,68 @@ const VoiceRecorder: React.FC<Props> = ({ onTranscriptionComplete }) => {
       mediaRecorder.start();
       setIsRecording(true);
 
-      // Inicia reconocimiento en vivo
+      // 3) Arrancamos reconocimiento con un pequeño delay
       setFinalText('');
       setInterimText('');
-      recoStopRef.current = transcriptionService.startRecognition(
-        (r) => {
-          if (r.isFinal) {
-            setFinalText((prev) => {
-              const next = (prev ? prev + ' ' : '') + r.text.trim();
-              onTranscriptionComplete(next + (interimText ? ' ' + interimText : ''));
-              return next;
-            });
-            setInterimText('');
-          } else {
-            setInterimText(r.text.trim());
-            onTranscriptionComplete(finalText + (r.text ? ' ' + r.text.trim() : ''));
-          }
-        },
-        (msg) => console.warn('Reconocimiento:', msg),
-        undefined,
-        { language: 'es-ES', continuous: true, interimResults: true }
-      );
+      setTimeout(() => {
+        // si mientras tanto el usuario ya detuvo, no seguimos
+        if (!isRecording && (!mediaRecorderRef.current || mediaRecorderRef.current.state !== 'recording')) {
+          isStartingRef.current = false;
+          return;
+        }
+        recoStopRef.current = transcriptionService.startRecognition(
+          (r) => {
+            if (r.isFinal) {
+              setFinalText((prev) => {
+                const next = (prev ? prev + ' ' : '') + r.text.trim();
+                onTranscriptionComplete(next + (interimText ? ' ' + interimText : ''));
+                return next;
+              });
+              setInterimText('');
+            } else {
+              setInterimText(r.text.trim());
+              onTranscriptionComplete(finalText + (r.text ? ' ' + r.text.trim() : ''));
+            }
+          },
+          (msg) => console.warn('Reconocimiento:', msg),
+          undefined,
+          { language: 'es-ES', continuous: true, interimResults: true }
+        );
+        isStartingRef.current = false;
+      }, 200); // 150–300ms suele ser suficiente
     } catch (err) {
       console.error('Error al iniciar la grabación:', err);
       alert('No se pudo acceder al micrófono. Revisa permisos del navegador.');
+      isStartingRef.current = false;
+      setIsRecording(false);
+      // por si quedó algo a medias
+      hardStopAll();
     }
   };
 
   const stopRecording = () => {
     try {
+      // Cortamos reconocimiento primero (para que no pelee con el stop del micro)
+      try { recoStopRef.current?.stop(); } catch {}
+      recoStopRef.current = null;
+
+      // Luego MediaRecorder
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.stop();
       }
-      recoStopRef.current?.stop();
-      recoStopRef.current = null;
     } finally {
       setIsRecording(false);
       onTranscriptionComplete((finalText + (interimText ? ' ' + interimText : '')).trim());
       setInterimText('');
+      isStartingRef.current = false;
     }
   };
 
-  // (Opcional) si mantienes un botón "Transcribir audio" por compatibilidad, muéstralo SOLO
-  // cuando haya audio y NO estés grabando.
+  // Solo muestra "Transcribir audio" si ya hay audio y NO estás grabando
   const showTranscribeButton = !!audioUrl && !isRecording;
 
   const handleTranscribe = () => {
-    // Aquí podrías abrir un modal/editor, o copiar el finalText a otra vista.
-    // Si no usas transcripción desde blob, puedes incluso ocultar este botón permanentemente.
-    alert('Este botón es opcional. La transcripción en vivo ya está funcionando.');
+    alert('La transcripción en vivo ya está en marcha; este botón es opcional (solo para un flujo extra).');
   };
 
   return (
